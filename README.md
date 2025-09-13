@@ -3,8 +3,10 @@
 #### Description
 A tool collection of xueqiu.com
 
-#### Software Architecture
-Simple xueqiu Cube class as you can see
+#### Instuctions
+
+1. Add your own xq_item/token.txt in below format:
+    xq_a_token=dde661f4ec6a7d34f9338262fc578497616dxxxx
 
 #### To do
 Add more functions and classes that I need
