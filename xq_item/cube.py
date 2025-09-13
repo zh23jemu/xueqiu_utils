@@ -158,20 +158,23 @@ class Cube:
         except json.JSONDecodeError:
             self.logger.error("Failed to get cube rebalances.")
 
-    def get_today_rebalance(self):
+    def get_specific_day_rebalance(self, date):
         """
-        Get today's successful user-initiated rebalancing records.
+        Get specific day's successful user-initiated rebalancing records.
         
         This method filters the rebalancing history to find records that:
-        1. Were created today
+        1. Were created on the specified date
         2. Are user-initiated (category is 'user_rebalancing')
         3. Have success status
         
+        Parameters:
+        - date (str): The target date in 'YYYYMMDD' format to filter rebalancing records
+        
         Returns:
-            list: A list of today's successful user-initiated rebalancing records.
+            list: A list of successful user-initiated rebalancing records for the specified date.
                   Returns an empty list if no matching records found.
         """
-        today_rebalance = []
+        specific_day_rebalance = []
 
         rebalance = self.get_rebalance()
         # Filter out item with category is "sys_rebalancing"
@@ -180,9 +183,8 @@ class Cube:
         rebalance = list(filter(lambda x: x['status'] == 'success', rebalance))
 
         if rebalance:
-            today = datetime.today().strftime('%Y%m%d')
             for item in rebalance:
-                date = conv_timestamp(item['updated_at']).strftime('%Y%m%d')
-                if date == today:
-                    today_rebalance.append(item)
-        return today_rebalance
+                rebalance_date = conv_timestamp(item['updated_at']).strftime('%Y%m%d')
+                if date == rebalance_date:
+                    specific_day_rebalance.append(item)
+        return specific_day_rebalance
