@@ -14,7 +14,7 @@ def read_token() -> str:
     Returns:
         str: The token read from the token file.
     """
-    with open('xq_item\\token.txt', 'r') as f:
+    with open('src\\token.txt', 'r') as f:
         return f.read().strip()
 
 
