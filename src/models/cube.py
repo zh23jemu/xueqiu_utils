@@ -136,7 +136,7 @@ class Cube:
             self.logger.error("Failed to get cube rebalances.")
             return None
 
-    def get_specific_day_rebalance(self, date) -> list:
+    def get_specific_day_rebalance(self, date=None) -> list:
         """
         Get specific day's successful user-initiated rebalancing records.
         
@@ -152,6 +152,8 @@ class Cube:
             list: A list of successful user-initiated rebalancing records for the specified date.
                   Returns an empty list if no matching records found.
         """
+        if date is None:
+            date = datetime.now().strftime("%Y%m%d")
         specific_day_rebalance = []
 
         rebalance = self.get_rebalance()
@@ -167,7 +169,7 @@ class Cube:
                     specific_day_rebalance.append(item)
         return specific_day_rebalance
 
-    def print_cube_today_rebalance(self):
+    def print_cube_day_rebalance(self, date=None):
         """
         Print today's rebalancing records for the specified cube.
 
@@ -177,11 +179,12 @@ class Cube:
         Returns:
             None
         """
+        if date is None:
+            date = datetime.now().strftime("%Y%m%d")
 
         if self.get_status() == 0:
             cube_info = self.get_basic_info()
-            today_string = datetime.now().strftime("%Y%m%d")
-            day_rebalance = self.get_specific_day_rebalance(today_string)
+            day_rebalance = self.get_specific_day_rebalance(date)
 
             cube_name = cube_info['name']
             for i in day_rebalance:
