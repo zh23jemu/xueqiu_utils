@@ -5,13 +5,15 @@ import time
 
 from datetime import datetime
 
+from DrissionPage import Chromium
+
 from src.utils import common
 
 
 class Cube:
     CUBE_PATTEN = r"^ZH\d{6,7}$"
     CUBE_INFO_PATTERN = r"SNB\.cubeInfo = {.*}"
-    CUBE_POSITION_URL = 'https://xueqiu.com/P/'
+    CUBE_URL = 'https://xueqiu.com/P/'
     CUBE_REBALANCE_URL = 'https://xueqiu.com/cubes/rebalancing/history.json?cube_symbol='
     CUBE_ALLDATA_URL = 'https://xueqiu.com/cubes/nav_daily/all.json?cube_symbol='
 
@@ -30,7 +32,7 @@ class Cube:
         self.token = common.read_token()
 
         # Build the cube location URL based on cube_id for subsequent access or reference to the cube's location information
-        self.position_url = self.CUBE_POSITION_URL + self.cube_id
+        self.cube_url = self.CUBE_URL + self.cube_id
         self.alldata_url = self.CUBE_ALLDATA_URL + self.cube_id
         self.rebalance_url = self.CUBE_REBALANCE_URL + self.cube_id
 
@@ -164,3 +166,73 @@ class Cube:
                 if date == rebalance_date:
                     specific_day_rebalance.append(item)
         return specific_day_rebalance
+
+    def print_cube_today_rebalance(self):
+        """
+        Print today's rebalancing records for the specified cube.
+
+        This method prints the rebalancing records for the specified cube for the current day.
+        It uses the get_specific_day_rebalance method to filter the rebalancing records for the current day.
+
+        Returns:
+            None
+        """
+
+        if self.get_status() == 0:
+            cube_info = self.get_basic_info()
+            today_string = datetime.now().strftime("%Y%m%d")
+            day_rebalance = self.get_specific_day_rebalance(today_string)
+
+            cube_name = cube_info['name']
+            for i in day_rebalance:
+                for j in i['rebalancing_histories']:
+                    updated_at = common.conv_timestamp(j['updated_at']).strftime('%Y-%m-%d %H:%M:%S')
+                    prev_weight = j['prev_weight'] if j['prev_weight'] is not None else 0.0
+                    target_weight = j['target_weight']
+                    trade_type = '买入' if target_weight - prev_weight > 0 else '卖出'
+                    stock_name = j['stock_name']
+                    price = j['price']
+                    print(
+                        f'{cube_name}\t{updated_at}\t{trade_type}\t{stock_name}\t{price}\t{prev_weight}->{target_weight}')
+
+    def get_position(self):
+        """
+        Get the position of the cube.
+
+        This method retrieves the position data of the cube by making an HTTP request
+        to the cube position URL. It parses the response to extract the position data.
+
+        Returns:
+            list: A list of position records if successful, None if failed to get data.
+                  Each record contains details about a specific stock holding.
+        """
+        cookies = f'{self.token}; domain=xueqiu.com;'
+
+        tab = Chromium().latest_tab
+        tab.set.cookies(cookies)
+
+        tab.get(self.cube_url)
+        try:
+            # print(tab.html)
+            match = re.findall(self.CUBE_INFO_PATTERN, tab.html)[0]
+            return json.loads(match.split('=')[1])['view_rebalancing']['holdings']
+        except json.JSONDecodeError:
+            self.logger.error("Position JSON load failed.")
+        finally:
+            tab.close()
+
+    def get_position_stock_list(self):
+        """
+        Get a simple list of stock names in the cube's position.
+
+        This method retrieves the position data of the cube and extracts the stock names.
+        It returns a list of stock names.
+
+        Returns:
+            list: A list of stock names in the cube's position.
+        """
+        name = self.get_basic_info()['name']
+        position = self.get_position()
+
+        stock_names = [item["stock_name"] for item in position]
+        return name, stock_names
