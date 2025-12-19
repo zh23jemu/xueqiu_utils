@@ -144,3 +144,4 @@ cython_debug/
 # Project files to ignore
 src/token.txt
 main.py
+cubes.json
