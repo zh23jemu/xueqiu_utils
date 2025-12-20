@@ -50,6 +50,7 @@ class XueqiuApp(QMainWindow):
         self.is_running = False
         self.current_logs = []
         self.json_logs = []
+        self.last_preview_dir = None
         
         # 调度器
         self.scheduler = BackgroundScheduler()
@@ -196,12 +197,17 @@ class XueqiuApp(QMainWindow):
             self.file_path_edit.setText(dir_path)
             self.config["data_dir"] = dir_path
             self.save_config()
-            self.preview_cubes()
 
     def preview_cubes(self):
-        data_dir = self.file_path_edit.text()
+        data_dir = self.file_path_edit.text().strip()
         if not data_dir or not os.path.isdir(data_dir):
+            self.last_preview_dir = None
             return
+            
+        # 避免同目录重复触发日志
+        if data_dir == self.last_preview_dir:
+            return
+        self.last_preview_dir = data_dir
             
         cubes_path = os.path.join(data_dir, "cubes.json")
         tokens_path = os.path.join(data_dir, "tokens.json")
@@ -240,9 +246,12 @@ class XueqiuApp(QMainWindow):
             if errors:
                 self.log(f"[预览] 错误: {', '.join(errors)}")
             elif cube_list:
-                self.log(f"[预览] 成功。已从 {cubes_path} 载入 {len(cube_list)} 个组合，已验证 {tokens_path}")
+                norm_cubes = os.path.normpath(cubes_path)
+                norm_tokens = os.path.normpath(tokens_path)
+                self.log(f"[预览] 成功。已从 {norm_cubes} 载入 {len(cube_list)} 个组合，已验证 {norm_tokens}")
         except Exception as e:
             self.log(f"[预览] 验证失败: {e}")
+            self.last_preview_dir = None
 
     def apply_schedule_settings(self):
         self.config["run_time"] = self.time_edit.time().toString("HH:mm")

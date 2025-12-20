@@ -147,3 +147,5 @@ main.py
 cubes.json
 last_run_results.json
 tokens.json
+query.py
+setup.py
