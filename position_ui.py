@@ -2,18 +2,16 @@ import sys
 import os
 import json
 import time
-import smtplib
-from email.mime.text import MIMEText
-from email.header import Header
+import zmail
 from datetime import datetime
 import threading
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QFileDialog, QPlainTextEdit,
-    QTimeEdit, QCheckBox, QGroupBox, QFormLayout, QMessageBox
+    QTimeEdit, QCheckBox, QGroupBox, QFormLayout, QMessageBox, QDateEdit
 )
-from PySide6.QtCore import Qt, QTimer, Signal, QObject, QTime
+from PySide6.QtCore import Qt, QTimer, Signal, QObject, QTime, QDate
 from PySide6.QtGui import QTextCursor
 from qt_material import apply_stylesheet
 
@@ -24,6 +22,7 @@ from src.models.cube import Cube
 
 class Communicate(QObject):
     print_signal = Signal(str)
+    finished_signal = Signal()
 
 class XueqiuApp(QMainWindow):
     def __init__(self):
@@ -38,6 +37,11 @@ class XueqiuApp(QMainWindow):
         # 信号传输
         self.comm = Communicate()
         self.comm.print_signal.connect(self.append_log)
+        self.comm.finished_signal.connect(self.on_task_finished)
+        
+        # 日志文件路径
+        self.log_file = os.path.join(os.getcwd(), "position_ui.log")
+        self.results_file = os.path.join(os.getcwd(), "last_run_results.json")
         
         self.init_ui()
         
@@ -103,10 +107,15 @@ class XueqiuApp(QMainWindow):
         self.weekdays_checkbox = QCheckBox("每周一至周五运行")
         self.weekdays_checkbox.setChecked(self.config.get("weekdays_only", True))
         
+        self.query_date_edit = QDateEdit()
+        self.query_date_edit.setCalendarPopup(True)
+        self.set_default_query_date()
+        
         btn_apply_sched = QPushButton("保存并应用定时设置")
         btn_apply_sched.clicked.connect(self.apply_schedule_settings)
         
         sched_form.addRow("运行时间:", self.time_edit)
+        sched_form.addRow("查询调仓日期:", self.query_date_edit)
         sched_form.addRow(self.weekdays_checkbox)
         sched_form.addRow(btn_apply_sched)
         sched_group.setLayout(sched_form)
@@ -115,22 +124,24 @@ class XueqiuApp(QMainWindow):
         # 邮件通知设置
         email_group = QGroupBox("邮件通知设置")
         email_form = QFormLayout()
-        self.smtp_server = QLineEdit(self.config.get("smtp_server", "smtp.qq.com"))
-        self.smtp_port = QLineEdit(self.config.get("smtp_port", "465"))
         self.sender_email = QLineEdit(self.config.get("sender_email", ""))
         self.sender_pwd = QLineEdit(self.config.get("sender_pwd", ""))
         self.sender_pwd.setEchoMode(QLineEdit.Password)
         self.receiver_email = QLineEdit(self.config.get("receiver_email", ""))
         
-        email_form.addRow("SMTP服务器:", self.smtp_server)
-        email_form.addRow("端口:", self.smtp_port)
         email_form.addRow("发件人邮箱:", self.sender_email)
         email_form.addRow("授权码/密码:", self.sender_pwd)
         email_form.addRow("收件人邮箱:", self.receiver_email)
         
         btn_save_email = QPushButton("保存邮件设置")
         btn_save_email.clicked.connect(self.save_email_settings)
-        email_form.addRow(btn_save_email)
+        self.btn_test_email = QPushButton("发送测试邮件")
+        self.btn_test_email.clicked.connect(self.test_send_email)
+        
+        email_btn_layout = QHBoxLayout()
+        email_btn_layout.addWidget(btn_save_email)
+        email_btn_layout.addWidget(self.btn_test_email)
+        email_form.addRow(email_btn_layout)
         email_group.setLayout(email_form)
         settings_layout.addWidget(email_group)
         
@@ -202,13 +213,22 @@ class XueqiuApp(QMainWindow):
         QMessageBox.information(self, "成功", "定时设置已更新并应用")
 
     def save_email_settings(self):
-        self.config["smtp_server"] = self.smtp_server.text()
-        self.config["smtp_port"] = self.smtp_port.text()
         self.config["sender_email"] = self.sender_email.text()
         self.config["sender_pwd"] = self.sender_pwd.text()
         self.config["receiver_email"] = self.receiver_email.text()
         self.save_config()
         QMessageBox.information(self, "成功", "邮件设置已保存")
+
+    def set_default_query_date(self):
+        today = QDate.currentDate()
+        weekday = today.dayOfWeek()  # 1 (Monday) to 7 (Sunday)
+        if weekday <= 5:
+            # Mon-Fri
+            self.query_date_edit.setDate(today)
+        else:
+            # Sat-Sun
+            days_to_subtract = weekday - 5
+            self.query_date_edit.setDate(today.addDays(-days_to_subtract))
 
     def update_schedule(self):
         self.scheduler.remove_all_jobs()
@@ -237,6 +257,14 @@ class XueqiuApp(QMainWindow):
         full_msg = f"[{timestamp}] {message}"
         self.comm.print_signal.emit(full_msg)
         self.current_logs.append(full_msg)
+        
+        # 写入日志文件
+        try:
+            with open(self.log_file, "a", encoding="utf-8") as f:
+                f.write(full_msg + "\n")
+        except Exception as e:
+            print(f"写入日志文件失败: {e}")
+        return full_msg
 
     def run_now(self):
         if self.is_running:
@@ -254,117 +282,160 @@ class XueqiuApp(QMainWindow):
 
     def run_task(self):
         self.current_logs = []
-        self.is_running = True
-        self.log("程序启动运行...")
-        
-        json_path = self.file_path_edit.text()
-        if not json_path or not os.path.exists(json_path):
-            self.log("错误: 未指定 JSON 文件或文件不存在!")
-            self.finish_run()
-            return
+        self.json_logs = []
+        if not self.is_running:
+            self.is_running = True
             
         try:
-            with open(json_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                if isinstance(data, list):
-                    cube_list = data
-                elif isinstance(data, dict):
-                    if "cube_list" in data:
-                        cube_list = data["cube_list"]
-                    else:
-                        # 如果是像 cubes.json 这样的字典格式，Key 就是组合 ID
-                        cube_list = list(data.keys())
-                else:
-                    self.log("错误: JSON 格式异常。")
-                    self.finish_run()
-                    return
+            query_date_str = self.query_date_edit.date().toString("yyyyMMdd")
+            start_msg = self.log(f"程序启动运行... (查询日期: {query_date_str})")
+            self.json_logs.append(start_msg)
             
-            self.log(f"成功读取 JSON。共发现 {len(cube_list)} 个组合: {', '.join(cube_list)}")
-        except Exception as e:
-            self.log(f"读取 JSON 失败: {e}")
-            self.finish_run()
-            return
-
-        for c in cube_list:
-            if not self.is_running:
-                self.log("程序已被用户手动停止。")
-                break
-            if not c: continue
+            json_path = self.file_path_edit.text()
+            if not json_path or not os.path.exists(json_path):
+                self.log("错误: 未指定 JSON 文件或文件不存在!")
+                return
+                
             try:
-                self.log(f"正在获取组合信息: {c} ...")
-                cb = Cube(c)
-                info = cb.get_basic_info()
-                self.log(f">>> 组合名称: {info['name']}")
-                self.log(f"    当前净值: {info['value']}")
-                self.log(f"    创建时间: {info['created_on']}")
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        cube_list = data
+                    elif isinstance(data, dict):
+                        if "cube_list" in data:
+                            cube_list = data["cube_list"]
+                        else:
+                            cube_list = list(data.keys())
+                    else:
+                        self.log("错误: JSON 格式异常。")
+                        return
                 
-                # 获取今日调仓
-                rebalances = cb.get_specific_day_rebalance()
-                if rebalances:
-                    for rb in rebalances:
-                        for h in rb.get('rebalancing_histories', []):
-                            updated_at = datetime.fromtimestamp(h['updated_at']/1000).strftime('%Y-%m-%d %H:%M:%S')
-                            prev = h.get('prev_weight', 0.0) or 0.0
-                            target = h.get('target_weight', 0.0)
-                            trade = '买入' if target > prev else '卖出'
-                            self.log(f"    [*] 调仓: {h['stock_name']} | {trade} | {prev:.2f}% -> {target:.2f}% | 价格: {h['price']} | 时间: {updated_at}")
-                else:
-                    self.log(f"    [-] 今日该组合无调仓记录")
-                
+                load_msg = self.log(f"成功读取 JSON。共发现 {len(cube_list)} 个组合: {', '.join(cube_list)}")
+                self.json_logs.append(load_msg)
             except Exception as e:
-                self.log(f"获取组合 {c} 详情时出错: {e}")
+                self.log(f"读取 JSON 失败: {e}")
+                return
+
+            for c in cube_list:
+                if not self.is_running:
+                    self.log("程序已被用户手动停止。")
+                    break
+                if not c: continue
+                
+                cube_temp_logs = []
+                has_rebalance = False
+                
+                try:
+                    cube_temp_logs.append(self.log(f"正在获取组合信息: {c} ..."))
+                    cb = Cube(c)
+                    info = cb.get_basic_info()
+                    cube_temp_logs.append(self.log(f">>> 组合名称: {info['name']}"))
+                    
+                    # 界面可见，但不进 JSON 暂存列表
+                    self.log(f"    当前净值: {info['value']}")
+                    self.log(f"    创建时间: {info['created_on']}")
+                    
+                    query_date_str = self.query_date_edit.date().toString("yyyyMMdd")
+                    rebalances = cb.get_specific_day_rebalance(query_date_str)
+                    if rebalances:
+                        has_rebalance = True
+                        for rb in rebalances:
+                            for h in rb.get('rebalancing_histories', []):
+                                updated_at = datetime.fromtimestamp(h['updated_at']/1000).strftime('%Y-%m-%d %H:%M:%S')
+                                prev = h.get('prev_weight', 0.0) or 0.0
+                                target = h.get('target_weight', 0.0)
+                                trade = '买入' if target > prev else '卖出'
+                                cube_temp_logs.append(self.log(f"    [*] 调仓: {h['stock_name']} | {trade} | {prev:.2f}% -> {target:.2f}% | 价格: {h['price']} | 时间: {updated_at}"))
+                    else:
+                        self.log(f"    [-] 今日该组合无调仓记录")
+                    
+                    if has_rebalance:
+                        self.json_logs.extend(cube_temp_logs)
+                        
+                except Exception as e:
+                    self.log(f"获取组合 {c} 详情时出错: {e}")
+                
+                time.sleep(2)
+
+            end_msg1 = self.log("程序运行结束。")
+            end_msg2 = self.log("="*50)
+            self.json_logs.extend([end_msg1, end_msg2])
             
-            # 模拟 main.py 中的延时，避免请求过快
-            time.sleep(2)
+            # 保存运行结果到 JSON 文件
+            self.save_run_results(self.json_logs)
+            
+            # 发送邮件
+            self.send_email()
 
-        self.log("程序运行结束。")
-        self.log("="*50)
-        
-        # 发送邮件
-        self.send_email()
-        self.finish_run()
+        except Exception as e:
+            self.log(f"运行过程发生未捕获异常: {e}")
+            
+        finally:
+            self.comm.finished_signal.emit()
 
-    def finish_run(self):
+    def on_task_finished(self):
         self.is_running = False
-        # 回到主线程恢复按钮
-        def restore_btn():
-            self.btn_run_now.setEnabled(True)
-            self.btn_stop.setEnabled(False)
-        QTimer.singleShot(0, restore_btn)
+        self.btn_run_now.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+
+    def save_run_results(self, logs):
+        """将过滤后的运行日志保存到 JSON 文件中"""
+        try:
+            result_data = {
+                "run_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "query_date": self.query_date_edit.date().toString("yyyyMMdd"),
+                "logs": logs
+            }
+            with open(self.results_file, "w", encoding="utf-8") as f:
+                json.dump(result_data, f, indent=4, ensure_ascii=False)
+            self.log(f"运行结果已保存到: {self.results_file}")
+        except Exception as e:
+            self.log(f"保存运行结果失败: {e}")
 
     def send_email(self):
+        content = "\n".join(self.current_logs)
+        self._execute_send_email(content, "监控日报")
+
+    def test_send_email(self):
         sender = self.sender_email.text()
         receiver = self.receiver_email.text()
         pwd = self.sender_pwd.text()
-        host = self.smtp_server.text()
-        port_str = self.smtp_port.text()
         
-        if not all([sender, receiver, pwd, host, port_str]):
-            self.log("邮件配置不全，已跳过邮件同步。")
+        if not all([sender, receiver, pwd]):
+            QMessageBox.warning(self, "错误", "邮件配置不完整，请填写所有字段后再测试。")
             return
             
-        try:
-            port = int(port_str)
-            content = "\n".join(self.current_logs)
-            message = MIMEText(content, 'plain', 'utf-8')
-            message['From'] = sender
-            message['To'] = receiver
-            date_str = datetime.now().strftime('%Y-%m-%d')
-            message['Subject'] = Header(f"雪球组合监控日报 - {date_str}", 'utf-8')
+        self.log("正在准备发送测试邮件...")
+        content = "这是一封来自雪球组合监控工具的测试邮件，如果您收到此邮件，说明配置正确。"
+        if self._execute_send_email(content, "测试邮件"):
+            QMessageBox.information(self, "成功", "测试邮件发送成功！")
+        else:
+            QMessageBox.critical(self, "失败", "测试邮件发送失败，请检查日志查看错误详情。")
 
-            # 这里默认使用 SSL 方式，通常 465 端口需要
-            if port == 465:
-                server = smtplib.SMTP_SSL(host, port)
-            else:
-                server = smtplib.SMTP(host, port)
-                server.starttls()
-                
-            server.login(sender, pwd)
-            server.sendmail(sender, [receiver], message.as_string())
-            server.quit()
-            self.log("邮件同步成功！")
+    def _execute_send_email(self, content, subject_suffix):
+        sender = self.sender_email.text()
+        receiver = self.receiver_email.text()
+        pwd = self.sender_pwd.text()
+        
+        if not all([sender, receiver, pwd]):
+            self.log(f"邮件配置不全，已跳过{subject_suffix}。")
+            return False
+            
+        try:
+            server = zmail.server(sender, pwd)
+            date_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            mail = {
+                'subject': f"雪球组合监控{subject_suffix} - {date_str}",
+                'content_text': content
+            }
+            
+            # zmail 会自动根据发件人识别 SMTP 服务器
+            server.send_mail(receiver, mail)
+            self.log(f"邮件({subject_suffix})同步成功！")
+            return True
         except Exception as e:
-            self.log(f"邮件发送失败: {e}")
+            self.log(f"邮件({subject_suffix})发送失败: {e}")
+            return False
 
 class StreamProxy:
     def __init__(self, log_func):
