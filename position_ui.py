@@ -373,15 +373,18 @@ class XueqiuApp(QMainWindow):
                 
                 time.sleep(2)
 
-            end_msg1 = self.log("程序运行结束。")
-            end_msg2 = self.log("="*50)
-            self.json_logs.extend([end_msg1, end_msg2])
-            
-            # 保存运行结果到 JSON 文件
-            self.save_run_results(self.json_logs)
-            
-            # 发送邮件
-            self.send_email()
+            if self.is_running:
+                end_msg1 = self.log("程序运行结束。")
+                end_msg2 = self.log("="*50)
+                self.json_logs.extend([end_msg1, end_msg2])
+                
+                # 保存运行结果到 JSON 文件
+                self.save_run_results(self.json_logs)
+                
+                # 发送邮件
+                self.send_email()
+            else:
+                self.log("程序被手动终止，跳过保存结果和发送邮件。")
 
         except Exception as e:
             self.log(f"运行过程发生未捕获异常: {e}")
