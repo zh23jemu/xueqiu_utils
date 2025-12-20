@@ -5,6 +5,7 @@ import time
 import zmail
 from datetime import datetime
 import threading
+import base64
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -48,6 +49,7 @@ class XueqiuApp(QMainWindow):
         # 运行控制状态
         self.is_running = False
         self.current_logs = []
+        self.json_logs = []
         
         # 调度器
         self.scheduler = BackgroundScheduler()
@@ -63,14 +65,28 @@ class XueqiuApp(QMainWindow):
             try:
                 with open(self.config_file, "r", encoding="utf-8") as f:
                     self.config = json.load(f)
+                
+                # 尝试解码密码
+                pwd = self.config.get("sender_pwd", "")
+                if pwd.startswith("b64:"):
+                    try:
+                        self.config["sender_pwd"] = base64.b64decode(pwd[4:]).decode('utf-8')
+                    except:
+                        pass
             except:
                 self.config = {}
         else:
             self.config = {}
 
     def save_config(self):
+        # 创建副本进行保存，避免修改内存中的明文配置
+        config_to_save = self.config.copy()
+        pwd = config_to_save.get("sender_pwd", "")
+        if pwd and not pwd.startswith("b64:"):
+            config_to_save["sender_pwd"] = "b64:" + base64.b64encode(pwd.encode('utf-8')).decode('utf-8')
+            
         with open(self.config_file, "w", encoding="utf-8") as f:
-            json.dump(self.config, f, indent=4, ensure_ascii=False)
+            json.dump(config_to_save, f, indent=4, ensure_ascii=False)
 
     def init_ui(self):
         central_widget = QWidget()
@@ -347,7 +363,7 @@ class XueqiuApp(QMainWindow):
                                 trade = '买入' if target > prev else '卖出'
                                 cube_temp_logs.append(self.log(f"    [*] 调仓: {h['stock_name']} | {trade} | {prev:.2f}% -> {target:.2f}% | 价格: {h['price']} | 时间: {updated_at}"))
                     else:
-                        self.log(f"    [-] 今日该组合无调仓记录")
+                        self.log(f"    [-] 当日该组合无调仓记录")
                     
                     if has_rebalance:
                         self.json_logs.extend(cube_temp_logs)
@@ -393,7 +409,7 @@ class XueqiuApp(QMainWindow):
             self.log(f"保存运行结果失败: {e}")
 
     def send_email(self):
-        content = "\n".join(self.current_logs)
+        content = "\n".join(self.json_logs)
         self._execute_send_email(content, "监控日报")
 
     def test_send_email(self):

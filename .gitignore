@@ -145,3 +145,4 @@ cython_debug/
 src/token.txt
 main.py
 cubes.json
+last_run_results.json
