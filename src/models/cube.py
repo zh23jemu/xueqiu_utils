@@ -17,19 +17,20 @@ class Cube:
     CUBE_REBALANCE_URL = 'https://xueqiu.com/cubes/rebalancing/history.json?cube_symbol='
     CUBE_ALLDATA_URL = 'https://xueqiu.com/cubes/nav_daily/all.json?cube_symbol='
 
-    def __init__(self, cube_id):
+    def __init__(self, cube_id, token_path='tokens.json'):
         """
         Initialize Cube object.
 
         Parameters:
         - cube_id (str): ID used to uniquely identify a cube.
+        - token_path (str): Path to the tokens.json file.
 
         The Cube object sets properties such as cube_id, cube_type, and position_url during initialization, and initializes a logger.
         """
         # Convert the input cube_id to uppercase and assign it to the instance attribute to ensure ID uniformity and case insensitivity
         self.cube_id = cube_id.upper()
 
-        self.token = common.read_token()
+        self.token = common.read_token(token_path)
 
         # Build the cube location URL based on cube_id for subsequent access or reference to the cube's location information
         self.cube_url = self.CUBE_URL + self.cube_id

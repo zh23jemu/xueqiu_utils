@@ -94,14 +94,14 @@ class XueqiuApp(QMainWindow):
         layout = QVBoxLayout(central_widget)
         
         # --- 数据源设置 ---
-        file_group = QGroupBox("数据源 (Cube List)")
+        file_group = QGroupBox("数据源 (Data Directory)")
         file_layout = QHBoxLayout()
-        self.file_path_edit = QLineEdit(self.config.get("json_path", ""))
-        self.file_path_edit.setPlaceholderText("选择包含 cube_list 的 JSON 文件")
+        self.file_path_edit = QLineEdit(self.config.get("data_dir", ""))
+        self.file_path_edit.setPlaceholderText("选择包含 cubes.json 和 tokens.json 的文件夹")
         self.file_path_edit.textChanged.connect(self.preview_cubes)
         btn_browse = QPushButton("浏览...")
         btn_browse.clicked.connect(self.browse_file)
-        file_layout.addWidget(QLabel("JSON文件:"))
+        file_layout.addWidget(QLabel("文件夹:"))
         file_layout.addWidget(self.file_path_edit)
         file_layout.addWidget(btn_browse)
         file_group.setLayout(file_layout)
@@ -191,20 +191,34 @@ class XueqiuApp(QMainWindow):
         layout.addLayout(ctrl_layout)
 
     def browse_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "选择JSON文件", "", "JSON Files (*.json)")
-        if file_path:
-            self.file_path_edit.setText(file_path)
-            self.config["json_path"] = file_path
+        dir_path = QFileDialog.getExistingDirectory(self, "选择数据目录")
+        if dir_path:
+            self.file_path_edit.setText(dir_path)
+            self.config["data_dir"] = dir_path
             self.save_config()
             self.preview_cubes()
 
     def preview_cubes(self):
-        json_path = self.file_path_edit.text()
-        if not json_path or not os.path.exists(json_path):
+        data_dir = self.file_path_edit.text()
+        if not data_dir or not os.path.isdir(data_dir):
+            return
+            
+        cubes_path = os.path.join(data_dir, "cubes.json")
+        tokens_path = os.path.join(data_dir, "tokens.json")
+        
+        errors = []
+        if not os.path.exists(cubes_path):
+            errors.append("缺少 cubes.json")
+        if not os.path.exists(tokens_path):
+            errors.append("缺少 tokens.json")
+            
+        if errors:
+            self.log(f"[预览] 错误: {', '.join(errors)}")
             return
             
         try:
-            with open(json_path, 'r', encoding='utf-8') as f:
+            # 验证 cubes.json
+            with open(cubes_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
             cube_list = []
@@ -216,10 +230,19 @@ class XueqiuApp(QMainWindow):
                 else:
                     cube_list = [k for k in data.keys() if str(k).startswith("ZH")]
             
-            if cube_list:
-                self.log(f"[预览] 已从文件载入 {len(cube_list)} 个组合: {', '.join(cube_list)}")
+            # 验证 tokens.json
+            with open(tokens_path, 'r', encoding='utf-8') as f:
+                token_data = json.load(f)
+                tokens = token_data.get('tokens', [])
+                if not tokens or 'token' not in tokens[0]:
+                    errors.append("tokens.json 格式错误或无有效 token")
+            
+            if errors:
+                self.log(f"[预览] 错误: {', '.join(errors)}")
+            elif cube_list:
+                self.log(f"[预览] 成功。已从 {cubes_path} 载入 {len(cube_list)} 个组合，已验证 {tokens_path}")
         except Exception as e:
-            self.log(f"[预览] 读取 JSON 失败: {e}")
+            self.log(f"[预览] 验证失败: {e}")
 
     def apply_schedule_settings(self):
         self.config["run_time"] = self.time_edit.time().toString("HH:mm")
@@ -307,13 +330,20 @@ class XueqiuApp(QMainWindow):
             start_msg = self.log(f"程序启动运行... (查询日期: {query_date_str})")
             self.json_logs.append(start_msg)
             
-            json_path = self.file_path_edit.text()
-            if not json_path or not os.path.exists(json_path):
-                self.log("错误: 未指定 JSON 文件或文件不存在!")
+            data_dir = self.file_path_edit.text()
+            if not data_dir or not os.path.isdir(data_dir):
+                self.log("错误: 未指定数据目录或目录不存在!")
+                return
+                
+            cubes_path = os.path.join(data_dir, "cubes.json")
+            tokens_path = os.path.join(data_dir, "tokens.json")
+            
+            if not os.path.exists(cubes_path) or not os.path.exists(tokens_path):
+                self.log(f"错误: 目录下缺少 cubes.json 或 tokens.json!")
                 return
                 
             try:
-                with open(json_path, 'r', encoding='utf-8') as f:
+                with open(cubes_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     if isinstance(data, list):
                         cube_list = data
@@ -323,15 +353,15 @@ class XueqiuApp(QMainWindow):
                         else:
                             cube_list = list(data.keys())
                     else:
-                        self.log("错误: JSON 格式异常。")
+                        self.log("错误: cubes.json 格式异常。")
                         return
                 
-                load_msg = self.log(f"成功读取 JSON。共发现 {len(cube_list)} 个组合: {', '.join(cube_list)}")
+                load_msg = self.log(f"成功读取配置。共发现 {len(cube_list)} 个组合，将使用 {tokens_path} 中的 token")
                 self.json_logs.append(load_msg)
             except Exception as e:
-                self.log(f"读取 JSON 失败: {e}")
+                self.log(f"读取配置失败: {e}")
                 return
-
+ 
             for c in cube_list:
                 if not self.is_running:
                     self.log("程序已被用户手动停止。")
@@ -343,7 +373,7 @@ class XueqiuApp(QMainWindow):
                 
                 try:
                     cube_temp_logs.append(self.log(f"正在获取组合信息: {c} ..."))
-                    cb = Cube(c)
+                    cb = Cube(c, token_path=tokens_path)
                     info = cb.get_basic_info()
                     cube_temp_logs.append(self.log(f">>> 组合名称: {info['name']}"))
                     

@@ -1,8 +1,8 @@
 {
-    "json_path": "C:/Coding/xueqiu_utils/cubes.json",
     "run_time": "15:00",
     "weekdays_only": true,
     "sender_email": "zh23j_emu@126.com",
     "sender_pwd": "b64:UlJLOXN0dDdUNzNuUzd5dQ==",
-    "receiver_email": "231016896@qq.com"
+    "receiver_email": "231016896@qq.com",
+    "data_dir": "C:/Coding/xueqiu_utils"
 }

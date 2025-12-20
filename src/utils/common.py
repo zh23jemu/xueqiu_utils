@@ -5,16 +5,24 @@ from datetime import datetime
 import requests
 
 
-def read_token() -> str:
+import os
+
+def read_token(token_path: str = 'tokens.json') -> str:
     """
     Read the token from tokens.json file.
 
     This method reads the tokens from tokens.json and returns the first one.
 
+    Parameters:
+    - token_path (str): Path to the tokens.json file.
+
     Returns:
         str: The first token read from tokens.json.
     """
-    with open('tokens.json', 'r', encoding='utf-8') as f:
+    if not os.path.exists(token_path):
+        raise FileNotFoundError(f"Token file not found: {token_path}")
+        
+    with open(token_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
         return data['tokens'][0]['token']
 
