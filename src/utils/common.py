@@ -7,15 +7,16 @@ import requests
 
 def read_token() -> str:
     """
-    Read the token from the token file.
+    Read the token from tokens.json file.
 
-    This method reads the token from the token file and returns it.
+    This method reads the tokens from tokens.json and returns the first one.
 
     Returns:
-        str: The token read from the token file.
+        str: The first token read from tokens.json.
     """
-    with open('src\\token.txt', 'r') as f:
-        return f.read().strip()
+    with open('tokens.json', 'r', encoding='utf-8') as f:
+        data = json.load(f)
+        return data['tokens'][0]['token']
 
 
 def get_http_response(token, url):
