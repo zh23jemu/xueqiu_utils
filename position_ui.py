@@ -24,6 +24,7 @@ from src.models.cube import Cube
 class Communicate(QObject):
     print_signal = Signal(str)
     finished_signal = Signal()
+    update_date_signal = Signal()
 
 class XueqiuApp(QMainWindow):
     def __init__(self):
@@ -39,6 +40,7 @@ class XueqiuApp(QMainWindow):
         self.comm = Communicate()
         self.comm.print_signal.connect(self.append_log)
         self.comm.finished_signal.connect(self.on_task_finished)
+        self.comm.update_date_signal.connect(self.set_default_query_date)
         
         # 日志文件路径
         self.log_file = os.path.join(os.getcwd(), "position_ui.log")
@@ -293,7 +295,11 @@ class XueqiuApp(QMainWindow):
             trigger = CronTrigger(hour=hour, minute=minute)
             day_desc = "每天"
             
-        self.scheduler.add_job(self.run_task, trigger)
+        self.scheduler.add_job(self.run_task, trigger, kwargs={"is_auto": True})
+        
+        # 新增：每天凌晨 00:01 自动更新查询日期
+        self.scheduler.add_job(lambda: self.comm.update_date_signal.emit(), 'cron', hour=0, minute=1)
+        
         self.log(f"定时任务已设定: {day_desc} {run_time.toString('HH:mm')}")
 
     def append_log(self, text):
@@ -320,7 +326,7 @@ class XueqiuApp(QMainWindow):
         self.btn_run_now.setEnabled(False)
         self.btn_stop.setEnabled(True)
         self.is_running = True
-        threading.Thread(target=self.run_task, daemon=True).start()
+        threading.Thread(target=self.run_task, args=(False,), daemon=True).start()
 
     def stop_run(self):
         if self.is_running:
@@ -328,13 +334,19 @@ class XueqiuApp(QMainWindow):
             self.log(">>> 正在请求停止程序，请稍候...")
             self.btn_stop.setEnabled(False)
 
-    def run_task(self):
+    def run_task(self, is_auto=False):
         self.current_logs = []
         self.json_logs = []
         if not self.is_running:
             self.is_running = True
             
         try:
+            if is_auto:
+                # 定时运行时，自动更新日期到最新交易日
+                self.comm.update_date_signal.emit()
+                # 稍微等待 UI 线程更新完成
+                time.sleep(0.5)
+                
             query_date_str = self.query_date_edit.date().toString("yyyyMMdd")
             start_msg = self.log(f"程序启动运行... (查询日期: {query_date_str})")
             self.json_logs.append(start_msg)
