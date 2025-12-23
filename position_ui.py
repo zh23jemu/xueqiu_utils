@@ -20,6 +20,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from src.models.cube import Cube
+from src.utils import cube as cube_utils
 
 class Communicate(QObject):
     print_signal = Signal(str)
@@ -383,6 +384,7 @@ class XueqiuApp(QMainWindow):
                 self.log(f"读取配置失败: {e}")
                 return
  
+            portfolios = []
             for c in cube_list:
                 if not self.is_running:
                     self.log("程序已被用户手动停止。")
@@ -398,9 +400,15 @@ class XueqiuApp(QMainWindow):
                     info = cb.get_basic_info()
                     cube_temp_logs.append(self.log(f">>> 组合名称: {info['name']}"))
                     
-                    # 界面可见，但不进 JSON 暂存列表
                     self.log(f"    当前净值: {info['value']}")
                     self.log(f"    创建时间: {info['created_on']}")
+                    
+                    # 获取持仓用于重复性检查
+                    try:
+                        name, stock_names = cb.get_position_stock_list()
+                        portfolios.append((name, stock_names))
+                    except Exception as pe:
+                        self.log(f"    [!] 获取持仓失败: {pe}")
                     
                     query_date_str = self.query_date_edit.date().toString("yyyyMMdd")
                     rebalances = cb.get_specific_day_rebalance(query_date_str)
@@ -426,8 +434,23 @@ class XueqiuApp(QMainWindow):
 
             if self.is_running:
                 end_msg1 = self.log("程序运行结束。")
+                self.json_logs.append(end_msg1)
+                
+                # 检查重复持仓
+                if portfolios:
+                    duplicates = cube_utils.find_duplicate_holdings(portfolios)
+                    if duplicates:
+                        dup_msg = self.log("\n[发现重复持仓]")
+                        self.json_logs.append(dup_msg)
+                        for stock, names in duplicates.items():
+                            item_msg = self.log(f"    - {stock}: {', '.join(names)}")
+                            self.json_logs.append(item_msg)
+                    else:
+                        no_dup_msg = self.log("\n[未发现重复持仓]")
+                        self.json_logs.append(no_dup_msg)
+                
                 end_msg2 = self.log("="*50)
-                self.json_logs.extend([end_msg1, end_msg2])
+                self.json_logs.append(end_msg2)
                 
                 # 保存运行结果到 JSON 文件
                 self.save_run_results(self.json_logs)
