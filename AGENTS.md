@@ -25,7 +25,9 @@
 ## 编辑须知
 
 - **持仓只能靠浏览器抓，没有可用接口**：`/cubes/holding/list.json` 等二十多个变体已全部 404 下线；持仓数据仍由服务端渲染进组合页 HTML 的 `SNB.cubeInfo.view_rebalancing.holdings`，老正则 `SNB\.cubeInfo = {.*}` + `split('=')[1]` 解析依然有效。**改这块前先读下面"雪球访问门槛"一节。**
-- **雪球访问门槛（2026-09 变更）**：组合页 `/P/ZHxxxxxx` 现在需要完整登录态，只注入 `xq_a_token` 会被重定向到 `/snowman/account/login`；且 WAF 会拦截所有普通 HTTP 请求抓取 HTML（各种 cookie 组合 + 完整 Chrome 请求头实测均返回 110310 字节挑战页），只有真实浏览器能过。JSON 接口（净值、调仓）不受影响。**首次使用必须先在程序控制的 Chrome 窗口里手动登录一次**，cookie 持久化在 DrissionPage 用户数据目录，之后定时任务才能抓到持仓。
+- **雪球访问门槛（2026-09 变更）**：组合页 `/P/ZHxxxxxx` 现在需要完整登录态，只注入 `xq_a_token` 会被重定向到 `/snowman/account/login`；且 WAF 会拦截所有普通 HTTP 请求抓取 HTML（各种 cookie 组合 + 完整 Chrome 请求头实测均返回 110310 字节挑战页），只有真实浏览器能过。JSON 接口（净值、调仓）不受影响。**首次使用必须先在程序控制的 Chrome 窗口里手动登录一次**，cookie 持久化在 DrissionPage 用户数据目录（`%LOCALAPPDATA%\Temp\DrissionPage\userData\9222`），之后定时任务才能抓到持仓。
+- **绝不要用 `tokens.json` 的 token 覆盖浏览器 cookie**：浏览器登录后拿到的是与账号绑定的新 `xq_a_token`，用旧 token 覆盖会立刻让会话失效。症状很有欺骗性——**第一个组合能抓到，从第二个开始全部跳登录页**。判断登录态看 `xq_is_login` cookie 是否存在（`u` / `xq_a_token` 存在但 `xq_is_login` 缺失＝未真正登录）。
+- **服务器上跑测试要用交互式会话**：SSH 落在会话 0（无桌面），DrissionPage 拉不起 Chrome（`BrowserConnectError: 127.0.0.1:9222`）。用 `schtasks /Create ... /IT /RU <用户>` 建任务把脚本跑在 RDP 桌面会话里，输出重定向到文件再读。残留的会话 0 Chrome 进程会占住 9222 端口，需按 `SESSION eq 0` 清掉。
 - **线程边界**：`run_task` 运行在后台线程，禁止直接操作 Qt 控件；所有 UI 更新必须经 `self.comm` 的 Signal（`print_signal` / `finished_signal` / `update_date_signal`）。
 - **邮件密码**：内存中是明文，落盘时由 `save_config` 自动加 `b64:` 前缀编码；不要把明文写回配置。
 - **`get_position()` 依赖本地 Chrome**：通过 DrissionPage 控制真实浏览器读取页面内嵌 JSON；无浏览器或未登录时抛 `RuntimeError`，不再抛 `IndexError`。
