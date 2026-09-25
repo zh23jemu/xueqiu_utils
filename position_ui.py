@@ -408,7 +408,8 @@ class XueqiuApp(QMainWindow):
                         name, stock_names = cb.get_position_stock_list()
                         portfolios.append((name, stock_names))
                     except Exception as pe:
-                        self.log(f"    [!] 获取持仓失败: {pe}")
+                        # 失败原因必须写进 json_logs，否则邮件里会看不到任何提示
+                        cube_temp_logs.append(self.log(f"    [!] 获取持仓失败: {pe}"))
                     
                     query_date_str = self.query_date_edit.date().toString("yyyyMMdd")
                     rebalances = cb.get_specific_day_rebalance(query_date_str)
@@ -448,6 +449,11 @@ class XueqiuApp(QMainWindow):
                     else:
                         no_dup_msg = self.log("\n[未发现重复持仓]")
                         self.json_logs.append(no_dup_msg)
+                else:
+                    # 原来的 else 错挂在 if duplicates 下面，portfolios 为空时整块被跳过，
+                    # 导致持仓全部抓取失败时邮件里重复持仓部分会静默消失，这里显式提示
+                    fail_msg = self.log("\n[持仓抓取失败，本次未进行重复持仓检测]")
+                    self.json_logs.append(fail_msg)
                 
                 end_msg2 = self.log("="*50)
                 self.json_logs.append(end_msg2)

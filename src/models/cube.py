@@ -217,9 +217,19 @@ class Cube:
 
         tab.get(self.cube_url)
         try:
-            # print(tab.html)
-            match = re.findall(self.CUBE_INFO_PATTERN, tab.html)[0]
-            return json.loads(match.split('=')[1])['view_rebalancing']['holdings']
+            # 雪球现在要求完整登录态：未登录时组合页会跳转到登录页，页面里不会有 SNB.cubeInfo。
+            # 这里显式判断并抛出可读异常，避免下游只看到一个没有信息量的 IndexError。
+            if '/snowman/account/login' in tab.url:
+                raise RuntimeError(
+                    '雪球未登录，无法抓取持仓；请先在程序控制的 Chrome 窗口中手动登录一次'
+                )
+
+            match = re.search(self.CUBE_INFO_PATTERN, tab.html)
+            if not match:
+                raise RuntimeError(
+                    '组合页面中未找到 SNB.cubeInfo，雪球页面结构可能已变更'
+                )
+            return json.loads(match.group(0).split('=')[1])['view_rebalancing']['holdings']
         except json.JSONDecodeError:
             self.logger.error("Position JSON load failed.")
         finally:
@@ -237,6 +247,11 @@ class Cube:
         """
         name = self.get_basic_info()['name']
         position = self.get_position()
+
+        # get_position 在页面 JSON 解析失败时会返回 None，这里显式拦截，
+        # 否则下面的列表推导会对 None 迭代并抛出难以理解的 TypeError
+        if not position:
+            raise RuntimeError('未获取到该组合的持仓数据')
 
         stock_names = [item["stock_name"] for item in position]
         return name, stock_names
