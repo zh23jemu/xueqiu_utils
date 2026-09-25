@@ -210,10 +210,11 @@ class Cube:
             list: A list of position records if successful, None if failed to get data.
                   Each record contains details about a specific stock holding.
         """
-        cookies = f'{self.token}; domain=xueqiu.com;'
-
+        # 注意：这里不要再用 tokens.json 里的 xq_a_token 覆盖浏览器 cookie。
+        # 浏览器手动登录后会拿到与该 token 绑定的会话，一旦被旧 token 覆盖，
+        # 雪球会立刻判定为未登录（表现为第一个组合能抓到、之后全部跳登录页）。
+        # 浏览器自身的登录态就是唯一可信来源。
         tab = Chromium().latest_tab
-        tab.set.cookies(cookies)
 
         tab.get(self.cube_url)
         try:
