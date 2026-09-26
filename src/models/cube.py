@@ -16,6 +16,9 @@ class Cube:
     CUBE_URL = 'https://xueqiu.com/P/'
     CUBE_REBALANCE_URL = 'https://xueqiu.com/cubes/rebalancing/history.json?cube_symbol='
     CUBE_ALLDATA_URL = 'https://xueqiu.com/cubes/nav_daily/all.json?cube_symbol='
+    # 持仓页偶发加载不完整（连续访问较快时会出现），重试一次再判定为页面结构变更
+    POSITION_RETRY_TIMES = 2
+    POSITION_RETRY_WAIT = 2
 
     def __init__(self, cube_id, token_path='tokens.json'):
         """
@@ -219,23 +222,56 @@ class Cube:
         #    因此保持标签页常驻，让登录态可以跨组合、跨多次运行存活。
         tab = Chromium().latest_tab
 
-        tab.get(self.cube_url)
         try:
-            # 雪球现在要求完整登录态：未登录时组合页会跳转到登录页，页面里不会有 SNB.cubeInfo。
-            # 这里显式判断并抛出可读异常，避免下游只看到一个没有信息量的 IndexError。
-            if '/snowman/account/login' in tab.url:
-                raise RuntimeError(
-                    '雪球未登录，无法抓取持仓；请先在程序控制的 Chrome 窗口中手动登录一次'
-                )
+            for attempt in range(self.POSITION_RETRY_TIMES):
+                tab.get(self.cube_url)
 
-            match = re.search(self.CUBE_INFO_PATTERN, tab.html)
-            if not match:
-                raise RuntimeError(
-                    '组合页面中未找到 SNB.cubeInfo，雪球页面结构可能已变更'
-                )
-            return json.loads(match.group(0).split('=')[1])['view_rebalancing']['holdings']
-        except json.JSONDecodeError:
-            self.logger.error("Position JSON load failed.")
+                # 雪球现在要求完整登录态：未登录时组合页会跳转到登录页，页面里不会有 SNB.cubeInfo。
+                # 这里显式判断并抛出可读异常，避免下游只看到一个没有信息量的 IndexError。
+                # 登录问题重试也没用，所以放在重试循环里直接抛。
+                if '/snowman/account/login' in tab.url:
+                    raise RuntimeError(
+                        '雪球未登录，无法抓取持仓；请先在程序控制的 Chrome 窗口中手动登录一次'
+                    )
+
+                try:
+                    holdings = self._parse_position(tab.html)
+                except json.JSONDecodeError:
+                    self.logger.error("Position JSON load failed.")
+                    holdings = None
+
+                if holdings:
+                    return holdings
+
+                # 页面没渲染出持仓数据时多半是加载不完整，等一下重新加载再试
+                if attempt < self.POSITION_RETRY_TIMES - 1:
+                    self.logger.info(
+                        f"持仓页未加载完整，{self.POSITION_RETRY_WAIT} 秒后重试。"
+                    )
+                    time.sleep(self.POSITION_RETRY_WAIT)
+
+            raise RuntimeError(
+                f'组合页面中未找到 SNB.cubeInfo（已重试 {self.POSITION_RETRY_TIMES} 次），'
+                '雪球页面结构可能已变更'
+            )
+        finally:
+            # 这里刻意不关闭标签页，理由见上方注释
+            pass
+
+    def _parse_position(self, html):
+        """
+        从组合页 HTML 中解析出持仓列表。
+
+        Parameters:
+        - html (str): 组合页面的 HTML 源码
+
+        Returns:
+            list: 持仓列表；页面里没有 SNB.cubeInfo 时返回 None（由调用方决定是否重试）
+        """
+        match = re.search(self.CUBE_INFO_PATTERN, html)
+        if not match:
+            return None
+        return json.loads(match.group(0).split('=')[1])['view_rebalancing']['holdings']
 
     def get_position_stock_list(self):
         """
