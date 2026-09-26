@@ -210,10 +210,13 @@ class Cube:
             list: A list of position records if successful, None if failed to get data.
                   Each record contains details about a specific stock holding.
         """
-        # 注意：这里不要再用 tokens.json 里的 xq_a_token 覆盖浏览器 cookie。
-        # 浏览器手动登录后会拿到与该 token 绑定的会话，一旦被旧 token 覆盖，
-        # 雪球会立刻判定为未登录（表现为第一个组合能抓到、之后全部跳登录页）。
-        # 浏览器自身的登录态就是唯一可信来源。
+        # 注意两件事，都踩过坑：
+        # 1) 这里不要再用 tokens.json 里的 xq_a_token 覆盖浏览器 cookie。
+        #    浏览器手动登录后的会话与该 token 绑定，覆盖会让服务端判定为未登录。
+        # 2) 绝对不要在这里 tab.close()：如果这是最后一个标签页，Chrome 会整个退出，
+        #    内存里的会话 cookie 随之丢失，表现为第一个组合能抓到、之后全部跳登录页。
+        #    实测关掉唯一标签页后 chrome 进程数直接归零，重开即未登录。
+        #    因此保持标签页常驻，让登录态可以跨组合、跨多次运行存活。
         tab = Chromium().latest_tab
 
         tab.get(self.cube_url)
@@ -233,8 +236,6 @@ class Cube:
             return json.loads(match.group(0).split('=')[1])['view_rebalancing']['holdings']
         except json.JSONDecodeError:
             self.logger.error("Position JSON load failed.")
-        finally:
-            tab.close()
 
     def get_position_stock_list(self):
         """
